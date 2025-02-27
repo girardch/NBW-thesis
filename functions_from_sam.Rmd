@@ -13,6 +13,9 @@ library(data.table)
 #install.packages("here")
 library(here)
 
+library(readxl)
+Master <- as.data.table(read_excel("C:/Users/balae/OneDrive/Desktop/Claire NBW thesis/data/Master.xlsx"))
+
 # Load dataset using a relative path
 Master <- as.data.table(read_excel(here("data", "Master.xlsx")))
 
@@ -481,55 +484,6 @@ if ("2021" %in% names(social_networks)) {
 
 
 
-```{r}
-
-# Save the 2021 social network plot as a high-resolution PNG
-if ("2021" %in% names(social_networks)) {
-  # Extract the 2021 social network
-  g_2021 <- social_networks[["2021"]]
-  
-  # Save as a high-resolution PNG file
-  png(
-    "C:/Users/balae/OneDrive/Desktop/Claire NBW thesis/data/social_network_2021.png",
-    width = 3000, height = 3000, res = 1000  # Increase dimensions to fit the content
-  )
-  
-  # Set up margins to accommodate plot elements
-  par(mar = c(1, 1, 3, 1))  # Margins: bottom, left, top, right
-  
-  # Plot the social network
-  plot(
-    g_2021,
-    edge.width = E(g_2021)$weight * 10,              # Scale edge width by HWI
-    vertex.size = V(g_2021)$strength / max(V(g_2021)$strength) * 15,  # Scale vertex size
-    vertex.label = NA,                              # Remove vertex labels
-    vertex.color = V(g_2021)$color,                 # Color nodes by age class
-    main = "Social Network for Year 2021"           # Title
-  )
-  
-  # Close the PNG device
-  dev.off()
-  
-  cat("High-resolution plot for the 2021 social network saved successfully.\n")
-} else {
-  warning("The 2021 social network does not exist in the dataset.")
-}
-
-
-
-
-```
-
-
-
-
-
-
-
-
-
-
-
 GLM 
 -needed to modify the final_results_3 table to add two new columns for dyadic age and sex
 -needed to modify the table depicting strength to calculate strength of dyads(?). need to confirm whether the response variable for strength for first glm is measuring strength for the dyads or individual whale 
@@ -643,6 +597,27 @@ saveRDS(glm_model, "glm_model_strength_beta_dyadic_age.rds")
 
 
 ```
+restrict to pairs where # of opportunities seen is greater than 3
+```{r}
+library(data.table)
+
+# If not already a data.table, convert
+setDT(final_results_4)
+
+# 1. For each pair (A, B), count how many *unique* sampling days
+#    in which at least one individual was observed.
+final_results_4[, days_any := uniqueN(sampling_day[(A_observed == 1 | B_observed == 1)]),
+                by = .(A, B)]
+
+# 2. Filter to keep only dyads with days_any > 3
+final_results_4_filtered <- final_results_4[days_any > 3]
+
+# View or use the filtered data
+print(final_results_4_filtered)
+
+
+
+```
 
 
 FIRST GLM FINAL
@@ -702,120 +677,68 @@ saveRDS(glm_model_5, "glm_model_5_edge_beta_multimembership.rds")
 Histogram shows that there are some values where HWI=0 despite filtering fr no 0 in the glm_data, checked with sum(glm_data$HWI == 0, na.rm = TRUE) to confirm there are no zeros
 ```{r}
 
-# Load necessary library
-library(ggplot2)
-
-# Create the histogram
-ggplot(glm_data, aes(x = strength)) +
-  geom_histogram(
-    binwidth = 0.2,                 # Set bin width to 0.2
-    fill = "blue",                  # Set fill color
-    color = "black",                # Set border color
-    alpha = 0.7                     # Set transparency
-  ) +
-  labs(
-    title = "Histogram of HWI Values",
-    x = "HWI (Strength)",
-    y = "Frequency"
-  ) +
-  theme_minimal() +
-  theme(
-    panel.grid.major = element_blank(),  # Remove major gridlines
-    panel.grid.minor = element_blank()   # Remove minor gridlines
-  )
-
-sum(glm_data$HWI == 0, na.rm = TRUE)
-
-
 ```
 
 
 
 ```{r}
-# Load necessary libraries
+# install.packages("ggeffects")  # Uncomment if not installed
+library(ggeffects)
 library(ggplot2)
-library(ggsignif)
-library(gridExtra)  # For arranging multiple plots
-library(data.table)
+library(gridExtra)
 
-# Ensure categorical variables are factors
-glm_data[, dyadic_age := as.factor(dyadic_age)]
-glm_data[, dyadic_sex := as.factor(dyadic_sex)]
+# Predictions for dyadic_age, averaging over random effects
+pred_age <- ggpredict(glm_model_5, terms = "dyadic_age", type = "fixed")
 
-# Define custom colors for dyadic age
-custom_colors_age <- c(
-  "Adult_Adult" = "lightblue",
-  "Calf_Calf" = "purple",
-  "Juvenile_Juvenile" = "darkblue",
-  "Adult_Calf" = "pink",
-  "Adult_Juvenile" = "blue",
-  "Calf_Juvenile" = "violet"
-)
+# Predictions for dyadic_sex, averaging over random effects
+pred_sex <- ggpredict(glm_model_5, terms = "dyadic_sex", type = "fixed")
 
-# Define custom colors for dyadic sex
-custom_colors_sex <- c(
-  "FemaleJ_Male" = "red",
-  "Male_Male" = "orange",
-  "FemaleJ_FemaleJ" = "green"
-)
+# Examine the prediction data (optional)
+head(pred_age)
+head(pred_sex)
 
-# Extract GLM results and p-values
-glm_summary <- summary(glm_model)$coefficients$mean
-p_values <- glm_summary[, "Pr(>|z|)"]
-significant_terms <- names(p_values[p_values < 0.05])  # Keep only significant results
-
-
-
-# Create the first box plot: HWI by Dyadic Age
-p1 <- ggplot(glm_data, aes(x = dyadic_age, y = strength, fill = dyadic_age)) +
-  geom_boxplot(alpha = 0.7) +
-  scale_fill_manual(values = custom_colors_age) +
-  labs(y = "HWI (Strength)", x = "Dyadic Age") +
+# Plot for dyadic_age
+p1 <- ggplot(pred_age, aes(x = x, y = predicted)) +
+  geom_point(size = 3, color = "darkblue") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                width = 0.2, color = "darkblue") +
+  labs(
+    x = "Dyadic Age",
+    y = "Predicted Edge (Adjusted HWI)",
+    title = "Model-Predicted Means by Dyadic Age"
+  ) +
   theme_minimal() +
   theme(
-    axis.text.x = element_text(size = 14, angle = 35, hjust = 1),
-    axis.text.y = element_text(size = 14),
-    axis.title.y = element_text(size = 14),
-    legend.position = "none",
-    panel.grid = element_blank(),
-    plot.title = element_blank()
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14)
   )
-# Create the second box plot: HWI by Dyadic Sex
-p2 <- ggplot(glm_data, aes(x = dyadic_sex, y = strength, fill = dyadic_sex)) +
-  geom_boxplot(alpha = 0.7) +
-  scale_fill_manual(values = custom_colors_sex) +
-  labs(y = "HWI (Strength)", x = "Dyadic Sex") +
+
+# Plot for dyadic_sex
+p2 <- ggplot(pred_sex, aes(x = x, y = predicted)) +
+  geom_point(size = 3, color = "darkred") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                width = 0.2, color = "darkred") +
+  labs(
+    x = "Dyadic Sex",
+    y = "Predicted Edge (Adjusted HWI)",
+    title = "Model-Predicted Means by Dyadic Sex"
+  ) +
   theme_minimal() +
   theme(
-    axis.text.x = element_text(size = 14, angle = 35, hjust = 1),
-    axis.text.y = element_text(size = 14),
-    axis.title.y = element_text(size = 14),
-    legend.position = "none",
-    panel.grid = element_blank(),
-    plot.title = element_blank()
-  ) 
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14)
+  )
 
-# Arrange both plots in one figure
+# Arrange both plots side by side
 final_plot <- grid.arrange(p1, p2, ncol = 2)
-
-# Show the plot
 print(final_plot)
 
-# Save the plot as a PNG file
-png("C:/Users/balae/OneDrive/Desktop/Claire NBW thesis/data/boxplot_HWI_dyadic_age_sex.png", 
-    width = 1800, height = 800, res = 150)
-
-grid.arrange(p1, p2, ncol = 2)
-
-# Close the PNG device
-dev.off()
-
-cat("Box plots for HWI by dyadic age and dyadic sex saved successfully.\n")
 
 ```
 
 
 ```{r}
+
 # Residuals vs Fitted
 plot(glm_model$fitted.values, residuals(glm_model), 
      main = "Residuals vs. Fitted Values",
@@ -833,6 +756,7 @@ qqline(residuals(glm_model), col = "red")
 
 NEW DATA FRAME FOR GLM 2
 ```{r}
+
 # Load the dataset as a data.table
 #Master <- as.data.table(read_excel("C:/Users/balae/OneDrive/Desktop/Claire NBW thesis/data/Master.xlsx"))
 
@@ -874,6 +798,7 @@ write.csv(ID_sex_age, "ID_sex_age_with_year.csv", row.names = FALSE)
 ```
 MERGE NETWORK_METRICS and IS_SEX_AGE TO CREATE FINAL_TABLE
 ```{r}
+
 # Ensure the `Year` column is consistently a character type in both tables
 network_metrics[, Year := as.character(as.integer(Year))]  # Convert to integer first to remove decimals, then to character
 ID_sex_age[, Year := as.character(as.integer(Year))]       # Do the same for ID_sex_age
@@ -943,35 +868,83 @@ print(unique(Master$year))  # Ensure all years are present
 # Calculate the number of unique days per Title and year
 Master[, numDaysByYear := uniqueN(Date), by = .(Title, year)]
 
-# Extract unique combinations of Title, year, and numDaysByYear to create the sampling_period data frame
+
+```
+
+```{r}
+library(readxl)
+library(data.table)
+library(lubridate)  # for the year() function
+
+# Load the dataset
+Master <- as.data.table(read_excel("C:/Users/balae/OneDrive/Desktop/Claire NBW thesis/data/Master.xlsx"))
+
+# Check if 'Title' exists
+if (!"Title" %in% colnames(Master)) {
+  stop("The 'Title' column is missing from the dataset.")
+}
+
+# Remove rows with titles containing "unk" or "see crops"
+Master <- Master[!grepl("unk|see crops", Title, ignore.case = TRUE)]
+
+# Convert Date.Original to a proper Date
+Master[, Date := as.IDate(Date.Original, format = "%Y-%m-%d")]
+
+# Extract year using lubridate's year() function
+Master[, year := year(Date)]
+
+# Remove rows with missing values in key columns
+Master <- Master[!is.na(Title) & !is.na(year) & !is.na(Date)]
+
+# Calculate the number of unique days per Title and year
+Master[, numDaysByYear := uniqueN(Date), by = .(Title, year)]
+
+# Extract unique combinations to create the sampling_period data frame
 sampling_period <- unique(Master[, .(Title, year, numDaysByYear)])
 
 # View the result
 print(sampling_period)
 
-# Save the resulting data frame to a CSV file (optional)
+# Save to CSV (optional)
 write.csv(sampling_period, "C:/Users/balae/OneDrive/Desktop/Claire NBW thesis/data/sampling_period.csv", row.names = FALSE)
 
 
 ```
 
+```{r}
+# Count the unique dates per Title and year in Master
+master_count <- Master[, .(masterUniqueDays = uniqueN(Date)), by = .(Title, year)]
+
+# Merge the counts with sampling_period (which has the column numDaysByYear)
+comparison <- merge(master_count, sampling_period, by = c("Title", "year"), all = TRUE)
+
+# Create a flag to check if the counts match
+comparison[, match := masterUniqueDays == numDaysByYear]
+
+# View the comparison table
+print(comparison)
+
+# Print a summary message
+if (any(!comparison$match)) {
+  cat("There are mismatches between Master and sampling_period:\n")
+  print(comparison[match == FALSE])
+} else {
+  cat("All counts match!\n")
+}
+
+
+
+
+```
+modified to show only Titles that appear more than 3 times in the dataset
+REMOVED--> bc it removed all calves
 
 ```{r}
-# Ensure consistent column names and data types
-setnames(final_table, old = "Year", new = "year")  # Rename 'Year' in final_table to 'year'
 
-# Check if necessary columns exist in both tables
-if (!"Title" %in% names(final_table) | !"year" %in% names(final_table)) {
-  stop("final_table must contain 'Title' and 'year' columns.")
-}
-if (!"Title" %in% names(sampling_period) | !"year" %in% names(sampling_period)) {
-  stop("sampling_period must contain 'Title' and 'year' columns.")
-}
-if (!"numDaysByYear" %in% names(sampling_period)) {
-  stop("'numDaysByYear' column is missing in sampling_period.")
-}
+# Rename 'Year' to 'year' in final_table if necessary
+#setnames(final_table, old = "Year", new = "year")
 
-# Ensure 'year' columns are numeric
+# Ensure 'year' columns are numeric in both tables
 final_table[, year := as.numeric(year)]
 sampling_period[, year := as.numeric(year)]
 
@@ -988,9 +961,13 @@ if (any(is.na(glm_data_2$numDaysByYear))) {
   warning("Some rows in glm_data_2 are missing numDaysByYear. Verify the merge.")
 }
 
+# Filter glm_data_2 to keep only Titles that appear more than 3 times
+#glm_data_2 <- glm_data_2[, if(.N > 3) .SD, by = Title]
+
+
 # View the resulting data frame
 head(glm_data_2)
-
+ 
 ```
 
 
@@ -1157,10 +1134,12 @@ setDT(glm_data_2)
 glm_data_2[, Age_Class := as.factor(Age_Class)]
 glm_data_2[, Sex := as.factor(Sex)]
 glm_data_2[, Title := as.factor(Title)]
-glm_data_2[, Year := as.factor(Year)]
+glm_data_2[, year := as.factor(year)]
+
+glm_data_2 <- glm_data_2[!is.na(Sex)]
 
 # Step 2: **Filter out Juvenile Males**
-glm_data_filtered <- glm_data_2[!(Age_Class == "Juvenile" & Sex == "Male")]
+glm_data_filtered_2 <- glm_data_2[!(Age_Class == "Juvenile" & Sex == "Male")]
 
 # **Reconvert categorical variables to factors after filtering**
 glm_data_filtered[, Age_Class := as.factor(Age_Class)]
@@ -1218,16 +1197,13 @@ cat("GLM analysis with Age_Class, Sex, and Sampling Periods completed successful
 
 visualization
 ```{r}
-# Load necessary libraries
-library(ggplot2)
-library(ggsignif)
+# 1. Create a filtered version of your data 
+glm_data_filtered_plot <- glm_data_filtered[!(
+  Sex == "Male" & Age_Class %in% c("Calf", "Juvenile")
+)]
 
-# Ensure Age_Class and Sex are factors
-glm_data_filtered[, Age_Class := as.factor(Age_Class)]
-glm_data_filtered[, Sex := as.factor(Sex)]
-
-# Create the box plot with separate panels for Sex
-p <- ggplot(glm_data_filtered, aes(x = Age_Class, y = Degree, fill = Age_Class)) +
+# 2. Plot using the filtered dataset
+p <- ggplot(glm_data_filtered_plot, aes(x = Age_Class, y = Degree, fill = Age_Class)) +
   geom_boxplot(alpha = 0.7, outlier.shape = NA) +  # Exclude outliers
   facet_wrap(~Sex) +  # Create separate panels for Male and Female
   scale_fill_manual(
@@ -1243,16 +1219,15 @@ p <- ggplot(glm_data_filtered, aes(x = Age_Class, y = Degree, fill = Age_Class))
   ) +
   theme_minimal() +
   theme(
-    axis.text = element_text(size = 18),       # Increase size of axis labels
-    axis.title = element_text(size = 18),     # Increase size of axis title
-    strip.text = element_text(size = 18),     # Increase size of facet labels
-    panel.grid.major = element_blank(),       # Remove major gridlines
-    panel.grid.minor = element_blank(),       # Remove minor gridlines
-    axis.title.x = element_blank(),           # Ensure x-axis title is blank
-    legend.position = "none"                  # Remove legend for simplicity
+    axis.text = element_text(size = 18),
+    axis.title = element_text(size = 18),
+    strip.text = element_text(size = 18),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.title.x = element_blank(),
+    legend.position = "none"
   )
 
-# Print the final plot
 print(p)
 
 
@@ -1322,7 +1297,7 @@ write.csv(final_results_6, "final_results_6.csv", row.names = FALSE)
 ```
 
 
-
+modified dataset to only show individuals that appear more than 3 times
 
 ```{r}
 # Load necessary library
@@ -1332,7 +1307,7 @@ library(data.table)
 setDT(ID_sex_age)
 
 # Rename "Title" to "Individual"
-setnames(ID_sex_age, old = "Title", new = "Individual")
+#setnames(ID_sex_age, old = "Title", new = "Individual")
 
 # View updated dataset
 print(ID_sex_age)
@@ -1347,12 +1322,14 @@ final_glm <- merge(final_results_6, ID_sex_age, by = c("Individual", "Year"), al
 missing_vals <- sum(is.na(final_glm))
 cat("Number of missing values after merging:", missing_vals, "\n")
 
-# View the merged dataset
+# Filter final_glm to only include Individuals that appear more than 3 times
+#final_glm <- final_glm[, if (.N > 3) .SD, by = Individual]
+
+# View the filtered merged dataset
 print(final_glm)
 
 # Save the merged dataset
 write.csv(final_glm, "final_glm.csv", row.names = FALSE)
-
 
 
 ```
@@ -1416,6 +1393,39 @@ cat("GLM analysis completed successfully.\n")
 
 ```
 
-dhdjd
+
+```{r}
+# Install ggeffects if you haven't already
+# install.packages("ggeffects")
+library(ggeffects)
+library(ggplot2)
+
+# Generate predictions for Age_Class using your fitted glm_model
+# The bracketed levels [Adult,Calf,Juvenile] ensures these levels appear in the plot
+preds <- ggpredict(glm_model, terms = "Age_Class [Adult,Calf,Juvenile]", type = "fixed")
+
+# Plot the predicted proportion of females (on 0-1 scale)
+pred_plot <- ggplot(preds, aes(x = x, y = predicted)) +
+  geom_point(size = 3, color = "darkblue") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                width = 0.2, color = "darkblue") +
+  labs(
+    x = "Age Class",
+    y = "Predicted Proportion Female",
+    title = "Predicted Proportion Female by Age Class"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    panel.grid = element_blank()  # Remove grid lines
+  )
+
+print(pred_plot)
+
+
+
+```
+
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
